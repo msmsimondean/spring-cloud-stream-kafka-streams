@@ -51,12 +51,12 @@ interface AnalyticsBinding {
 		@Output(PAGE_VIEWS_OUT)
 		MessageChannel pageViewsOut();
 
-		// page cocunts
+		// page counts
 		@Output(PAGE_COUNT_OUT)
-		KStream<String, Long> pageCountOut();
+		KStream<String, List<PageViewEvent>> pageCountOut();
 
 		@Input(PAGE_COUNT_IN)
-		KTable<String, Long> pageCountIn();
+		KTable<String, List<PageViewEvent>> pageCountIn();
 }
 
 @SpringBootApplication
@@ -83,7 +83,7 @@ public class AnalyticsApplication {
 						List<String> pages = Arrays.asList("blog", "sitemap", "initializr", "news", "colophon", "about");
 						Runnable runnable = () -> {
 								String rPage = pages.get(new Random().nextInt(pages.size()));
-								String rName = pages.get(new Random().nextInt(names.size()));
+								String rName = names.get(new Random().nextInt(names.size()));
 								PageViewEvent pageViewEvent = new PageViewEvent(rName, rPage, Math.random() > .5 ? 10 : 1000);
 								Message<PageViewEvent> message = MessageBuilder
 									.withPayload(pageViewEvent)
@@ -106,12 +106,14 @@ public class AnalyticsApplication {
 
 				@StreamListener
 				@SendTo(AnalyticsBinding.PAGE_COUNT_OUT)
-				public KStream<String, Long> process(@Input(AnalyticsBinding.PAGE_VIEWS_IN) KStream<String, PageViewEvent> events) {
+				public KStream<String, List<PageViewEvent>> process(@Input(AnalyticsBinding.PAGE_VIEWS_IN) KStream<String, PageViewEvent> events) {
 						return events
 							.filter((key, value) -> value.getDuration() > 10)
-							.map((key, value) -> new KeyValue<>(value.getPage(), "0"))
 							.groupByKey()
-							.count(Materialized.as(AnalyticsBinding.PAGE_COUNT_MV))
+							.aggregate(() -> (List<PageViewEvent>) new ArrayList<PageViewEvent>(), (key, value, aggregate) -> {
+								aggregate.add(value);
+								return aggregate;
+							}, Materialized.as(AnalyticsBinding.PAGE_COUNT_MV))
 							.toStream();
 				}
 		}
@@ -122,12 +124,12 @@ public class AnalyticsApplication {
 				private final Log log = LogFactory.getLog(getClass());
 
 				@StreamListener
-				public void pageCount(@Input((AnalyticsBinding.PAGE_COUNT_IN)) KTable<String, Long> counts) {
+				public void pageCount(@Input((AnalyticsBinding.PAGE_COUNT_IN)) KTable<String, List<PageViewEvent>> counts) {
 
 
 						counts
 							.toStream()
-							.foreach((key, value) -> log.info(key + "=" + value));
+							.foreach((key, value) -> log.info(key + "=" + value.size()));
 				}
 		}
 
